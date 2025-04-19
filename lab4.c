@@ -83,6 +83,8 @@ void lcd_clear(void) {
     _delay_ms(2);        // Wait for LCD to process (needs about 1.5ms)
 }
 
+/* 
+//old tca module
 void tca8418_init(){
     uint8_t config[2];
     config[0] = REG_KP_GPIO1;
@@ -90,11 +92,45 @@ void tca8418_init(){
     i2c_io(TCA8418_ADDR, config, 2, NULL, 0);
 }
 
+*/
+//updated tca module
+void tca8418_init() {
+    unsigned char status;
+    char temp[20]; //to read later on
+    //writing 0x0F to KP_GPIO1 register
+    uint8_t config[2];
+    config[0] = REG_KP_GPIO1;
+    config[1] = 0x3F;
+    //i2c_io(0x68, config, 2, NULL, 0); //adress to write 0x68
+    status = i2c_io(0x68, config, 2, NULL, 0);
+
+    //checking whether tca ACK
+    if (status != 0) {
+        lcd_set_cursor(0x00);
+        lcd_print("TCA Write Fail!");
+        return;
+    }else{
+        lcd_set_cursor(0x00);
+        lcd_print("TCA Write Good");
+    }
+
+    _delay_ms(10); //delay for setup time
+
+    uint8_t wbuf[1] = { REG_KP_GPIO1 }; //
+    uint8_t rbuf[1] = { 0x00 };
+    status = i2c_io(0x69, wbuf, 1, rbuf, 1); //0x69 address to read
+
+    lcd_set_cursor(0x42);
+    sprintf(temp, "DATA: 0x%02X", rbuf[0]);
+    lcd_print(temp);
+
+}
+
 
 int main(void)
 {
     serial_init(47);
-    state_unlocked();
+    //state_unlocked(); //commented to debug tca i2c for now
 
     i2c_init(BDIV);
     tca8418_init();
