@@ -26,11 +26,30 @@
 #define REG_KP_GPIO1    0x1D
 #define REG_KP_GPIO2    0x1E
 #define REG_KP_GPIO3    0x1F
+#define TCA_WRITE_ADDR  0x68
+#define TCA_READ_ADDR   0x69
 
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdio.h>
+#include<avr/interrupt.h>
+#include <stdbool.h> 
 #include "i2c.h"
+
+volatile bool flag_tca_int = false; 
+
+typedef enum{
+    state_unlocked,
+    state_locked,
+    state_attempt_unlock
+} State; 
+
+char keypad[4][3] = {
+    {'1', '2', '3'},
+    {'4', '5', '6'},
+    {'7', '8', '9'},
+    {'*', '0', '#'}
+};
 
 
 void serial_out(char ch) {
@@ -47,12 +66,14 @@ void serial_init(unsigned short ubrr) {
 
 }
 
-void display_init(){
+void lcd_init(){
     _delay_ms(100);
-
     serial_out(0xFE);    // Command prefix
-    serial_out(0x53);    // Set brightness command
-    serial_out(0x08);    // Brightness level 8 (full)
+    serial_out(0x51);
+
+    // serial_out(0x53);    // Set brightness command
+    // serial_out(0x08);    // Brightness level 8 (full)
+    // serial_out();
 }
 
 void lcd_command(uint8_t cmd) {
@@ -69,12 +90,16 @@ void lcd_print(const char* str) {
     }
 }
 
-void state_unlocked(){
-    lcd_set_cursor(2);
+void lcd_state_unlocked(){
+    lcd_init();
+    lcd_set_cursor(0x02);
     lcd_print("Porch  Protector");
     _delay_ms(10);
-    lcd_set_cursor(42);
+    lcd_set_cursor(0x42);
     lcd_print("*** UNLOCKED ***");
+    _delay_ms(10);
+    lcd_set_cursor(0x54);
+    lcd_print("  PRESS # FOR LOCK");
     
 }
 void lcd_clear(void) {
@@ -83,57 +108,203 @@ void lcd_clear(void) {
     _delay_ms(2);        // Wait for LCD to process (needs about 1.5ms)
 }
 
-/* 
-//old tca module
-void tca8418_init(){
-    uint8_t config[2];
-    config[0] = REG_KP_GPIO1;
-    config[1] = 0x0F;
-    i2c_io(TCA8418_ADDR, config, 2, NULL, 0);
-}
 
-*/
 //updated tca module
 void tca8418_init() {
+    uint8_t reset_cmd[] = { 0x1E, 0xFF }; 
+    i2c_io(0x68, reset_cmd, 2, NULL, 0); // TCA software reset
+
     unsigned char status;
     char temp[20]; //to read later on
+    
     //writing 0x0F to KP_GPIO1 register
     uint8_t config[2];
     config[0] = REG_KP_GPIO1;
-    config[1] = 0x3F;
-    //i2c_io(0x68, config, 2, NULL, 0); //adress to write 0x68
+    config[1] = 0x0F; // activating row[3-0] KP_GPIO1
     status = i2c_io(0x68, config, 2, NULL, 0);
 
-    //checking whether tca ACK
+    config[0] = REG_KP_GPIO2;
+    config[1] = 0x07; // activating col[2-0] KP_GPIO2
+    status = i2c_io(0x68, config, 2, NULL, 0);
+
+    status = i2c_io(0x68, (uint8_t[]){ 0x1F, 0x00 }, 2, NULL, 0); // KP_GPIO3
+    status = i2c_io(0x68, (uint8_t[]){ 0x01, 0x41 }, 2, NULL, 0); // enable keypad interrupts
+    status = i2c_io(0x68, (uint8_t[]){ 0x03, 0x00 }, 2, NULL, 0); // KEY_LCK_EC: clear K_LCK_EN , activate keypad scanning 
+
+  
+    // TEST CODE
+    //initial I2C check to see if TCA ack
     if (status != 0) {
         lcd_set_cursor(0x00);
-        lcd_print("TCA Write Fail!");
+        lcd_print("Keypad Init Fail");
         return;
     }else{
         lcd_set_cursor(0x00);
-        lcd_print("TCA Write Good");
+        lcd_print("Keypad Init Success");
     }
+    // Test code: reads for a key press and displays it 
+    _delay_ms(10); 
+    _delay_ms(3000);
+    // uint8_t wbuf[1] = { 0x03 }; 
+    // uint8_t rbuf[1] = { 0x00 };
+    // wbuf[0] = 0x04 ; 
+    // rbuf[0] = 0x00 ;
+    // status = i2c_io(0x69, wbuf, 1, rbuf, 1); //0x69 address to read
 
-    _delay_ms(10); //delay for setup time
+    // // decode row and column
+    // char number = rbuf[0] & 0x7F;    //mask out MSB
+    // int row = ((int)number - 1) / 10;
+    // int col = ((int)number - 1) % 10;
 
-    uint8_t wbuf[1] = { REG_KP_GPIO1 }; //
-    uint8_t rbuf[1] = { 0x00 };
-    status = i2c_io(0x69, wbuf, 1, rbuf, 1); //0x69 address to read
+    // char keypad[4][3] = {
+    //     {'1', '2', '3'},
+    //     {'4', '5', '6'},
+    //     {'7', '8', '9'},
+    //     {'*', '0', '#'}
+    // };
 
-    lcd_set_cursor(0x42);
-    sprintf(temp, "DATA: 0x%02X", rbuf[0]);
-    lcd_print(temp);
-
+    // lcd_set_cursor(0x40);
+    // lcd_print("Key Press: ");
+    // lcd_print((char[]){keypad[row][col], '\0'});
 }
+
+
+
+
+
+ISR(PCINT1_vect){
+    //update volatile flag: int flag 
+    flag_tca_int = true; 
+    
+}
+
+
+
+
 
 
 int main(void)
 {
+    //confirm this 
+    sei(); //interrupt enabler
+    PCMSK1 |= (1<<PCINT11);
+    PCICR  |= (1<<PCIE1);
+ 
     serial_init(47);
-    //state_unlocked(); //commented to debug tca i2c for now
-
+    lcd_init();
     i2c_init(BDIV);
     tca8418_init();
 
+    _delay_ms(1000);
+    // FSM
+    State current_state  = state_unlocked;
+
+    //test code, check if flag is set from ISR
+    lcd_set_cursor(0x40);
+    if(flag_tca_int){
+        lcd_print("flag TRUE");
+    }
+    else {
+        lcd_print("flag FALSE"); 
+    }
+
+    while(1){
+        switch(current_state){
+            case state_unlocked: { // case block used to allow for variable declarations
+                bool flag_hashtag_received = false; 
+                uint8_t tca_fifo_count = 0;
+                uint8_t wbuf[1] = { 0x03 }; 
+                uint8_t rbuf[1] = { 0x00 }; 
+                char fifo_content[10];  
+
+                //lcd_state_unlocked(); //commented for testing
+                lcd_set_cursor(0x54); 
+                lcd_print("Pressed: ");
+                while(!flag_hashtag_received){ // wait for hashtag
+                    
+                    if(flag_tca_int){ // if flag is set from ISR
+                        flag_tca_int = false; //reset flag
+
+                        i2c_io(0x69, wbuf, 1, rbuf, 1); 
+                        tca_fifo_count = (uint8_t) (rbuf[0]&0x0F);  // get fifo count 
+
+                        // lcd_set_cursor(0x14); 
+                        // char buffer[20];
+                        // sprintf(buffer, "Fifo Count: %d", tca_fifo_count);
+                        // lcd_print(buffer);
+                        
+
+                        for(int i = 0; i < tca_fifo_count; i++){ // read fifo contents into fifo_content array
+                            wbuf[0] = 0x04; 
+                            rbuf[0] = 0x00; 
+                            i2c_io(0x69, wbuf, 1, rbuf, 1);
+                            fifo_content[i] = rbuf[0]; 
+                            if(fifo_content[i] & 0x80){
+                                fifo_content[i] = fifo_content[i] & 0x7F; 
+                                int row = ((int)fifo_content[i] - 1) / 10;
+                                int col = ((int)fifo_content[i] - 1) % 10;
+                                fifo_content[i] = keypad[row][col];
+
+                                char buffer[20];
+                                sprintf(buffer, "%c", fifo_content[i]);
+
+                                
+                                lcd_print(buffer);
+                                lcd_print(" .");
+                            }
+                        }
+                        
+                        
+                    }
+                    i2c_io(0x68, (uint8_t[]){0x02, 0x1F}, 2, rbuf, 1); // clear all interrupts in INT_STAT reg
+                   
+    
+                //         for(int i = 0; i < tca_fifo_count; i++){
+                //             if(fifo_content[i] & 0x80){ // filter for key presses only. 
+                //                 char number = fifo_content[i] & 0x7F;    //mask out MSB
+                //                 int row = ((int)number - 1) / 10;
+                //                 int col = ((int)number - 1) % 10;
+                //                 char result = keypad[row][col]; 
+        
+                //                 if(result == '#'){  // execute state change 
+                //                     current_state = state_locked; 
+                //                     flag_hashtag_received = true; 
+                //                     break; 
+                //                 }
+                            // }
+                        
+                    }
+                    break;
+                }
+               
+            
+            case state_locked:
+                //IO 
+                //lcd locked state
+                //solenoid locked state 
+
+                //next state logic
+                while(1){
+                    //password array counter
+
+                    //if int flag is set
+                        //unload contents
+                        //reset tca flag 
+                    //fill up temp password array
+                    //update lcd with unloaded contents
+
+                    //when size is 4, check. 
+                    //if match, display message (unlocking)
+                    //else clear 
+                    //check the password array for match 
+
+                }
+                break;
+            
+            case state_attempt_unlock:
+                
+                break; 
+        }
+    }
     return 0;   /* never reached */
 }
