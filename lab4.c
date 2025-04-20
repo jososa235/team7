@@ -258,20 +258,30 @@ int main(void)
                                     if(ch == '*'){
                                         user_input[user_index] = '\0';
                                         if (strcmp(global_code, user_input) == 0) {
+                                            lcd_set_cursor(0x54);
+                                            lcd_print("               ");
+                                            lcd_set_cursor(0x54);
                                             lcd_print("PASS");
                                             //line to transition
                                         }else{
-                                            lcd_print(" NO PASS");
-                                            
+                                            lcd_set_cursor(0x54);
+                                            lcd_print("               ");
+                                            lcd_set_cursor(0x54);
+                                            lcd_print("NO PASS");
+                                            _delay_ms(500);
+                                            lcd_set_cursor(0x54); 
+                                            lcd_print("Pressed: ");
+                                            //continue;
                                         }
-                                        lcd_set_cursor(0x54);
-                                        lcd_print("IN:");
-                                        char temp[10];
+                                        //lcd_set_cursor(0x54);
+                                        //lcd_print("IN:");
+                                        //char temp[10];
                                         //sprintf(temp, "%10s", user_input); 
                                         //lcd_print()
-                                        lcd_print(user_input);
+                                        //lcd_print(user_input);
                                         user_input[0] = '\0';
                                         user_index = 0;            // Reset input
+                                        flag_hashtag_received = false;
                                         
                                     } else {
                                         if (user_index < sizeof(user_input) - 1) {
