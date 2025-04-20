@@ -102,6 +102,8 @@ void lcd_state_unlocked(){
     lcd_print("  PRESS # FOR LOCK");
     
 }
+
+
 void lcd_clear(void) {
     serial_out(0xFE);    // Command prefix
     serial_out(0x51);    // Clear screen command
@@ -212,10 +214,6 @@ int main(void)
         switch(current_state){
             case state_unlocked: { // case block used to allow for variable declarations
                 bool flag_hashtag_received = false; 
-                //uint8_t tca_fifo_count = 0;
-                //uint8_t wbuf[1] = { 0x03 }; 
-                //uint8_t rbuf[1] = { 0x00 }; 
-                //char fifo_content[10];  
 
                 //lcd_state_unlocked(); //commented for testing
                 lcd_set_cursor(0x54); 
@@ -251,35 +249,22 @@ int main(void)
                                     char buf[4];
                                     sprintf(buf, "%c", ch);
                                     lcd_print(buf);
+
+                                    if (ch == '#'){
+                                        flag_hashtag_received = true;
+                                        current_state = state_locked; 
+                                        break; 
+                                    }
                                 }
                             }
                         }
-                    
                         //writing to INT_STAT to clear interrupt bits
                         uint8_t clear_int[] = {0x02, 0x1F};
                         i2c_io(0x68, clear_int, 2, NULL, 0);
-                    }
-                    
-                    //i2c_io(0x68, (uint8_t[]){0x02, 0x1F}, 2, NULL, 0); // clear all interrupts in INT_STAT reg
-                   
-    
-                //         for(int i = 0; i < tca_fifo_count; i++){
-                //             if(fifo_content[i] & 0x80){ // filter for key presses only. 
-                //                 char number = fifo_content[i] & 0x7F;    //mask out MSB
-                //                 int row = ((int)number - 1) / 10;
-                //                 int col = ((int)number - 1) % 10;
-                //                 char result = keypad[row][col]; 
-        
-                //                 if(result == '#'){  // execute state change 
-                //                     current_state = state_locked; 
-                //                     flag_hashtag_received = true; 
-                //                     break; 
-                //                 }
-                            // }
-                        
-                    }
-                    break;
+                    }    
                 }
+                break;
+            }
                
             
             case state_locked:
