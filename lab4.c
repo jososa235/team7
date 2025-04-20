@@ -17,6 +17,7 @@
 * 09/14/12 A. Weber    Initial Release
 * 11/18/13 A. Weber    Renamed for ATmega328P
 *************************************************************/
+#include <string.h>
 #define FOSC 7372800
 
 #define BDIV (((FOSC / 100000) - 16) / 2 + 1)
@@ -210,6 +211,11 @@ int main(void)
         lcd_print("flag FALSE"); 
     }
 
+    char user_input[6] = "";
+    int user_index = 0;
+    char global_code[6] = "12345";
+
+
     while(1){ //state machine
         switch(current_state){
             case state_unlocked: { // case block used to allow for variable declarations
@@ -248,13 +254,38 @@ int main(void)
                                     char ch = keypad[row][col];
                                     char buf[4];
                                     sprintf(buf, "%c", ch);
-                                    lcd_print(buf);
+                                    lcd_print(buf); //printing in real time
+                                    if(ch == '*'){
+                                        user_input[user_index] = '\0';
+                                        if (strcmp(global_code, user_input) == 0) {
+                                            lcd_print("PASS");
+                                            //line to transition
+                                        }else{
+                                            lcd_print(" NO PASS");
+                                            
+                                        }
+                                        lcd_set_cursor(0x54);
+                                        lcd_print("IN:");
+                                        char temp[10];
+                                        //sprintf(temp, "%10s", user_input); 
+                                        //lcd_print()
+                                        lcd_print(user_input);
+                                        user_input[0] = '\0';
+                                        user_index = 0;            // Reset input
+                                        
+                                    } else {
+                                        if (user_index < sizeof(user_input) - 1) {
+                                            user_input[user_index++] = ch;  // Append char to string
+                                        }
+                                    }
 
+                                    /*
                                     if (ch == '#'){
                                         flag_hashtag_received = true;
                                         current_state = state_locked; 
                                         break; 
                                     }
+                                    */
                                 }
                             }
                         }
