@@ -38,7 +38,6 @@
 #include "i2c.h"
 
 volatile bool flag_tca_int = false; 
-volatile bool flag_prev_motion_lvl = false; 
 
 typedef enum{
     state_unlocked,
@@ -69,16 +68,12 @@ void serial_init(unsigned short ubrr) {
 }
 
 void lcd_init(){
-    _delay_ms(10);
-    serial_out(0xFE);    // Command prefix
-    serial_out(0x41);
-    _delay_ms(10);
+    _delay_ms(100);
     serial_out(0xFE);    // Command prefix
     serial_out(0x51);
-    _delay_ms(10);
-    serial_out(0xFE);
-    serial_out(0x53);    // Set brightness command
-    serial_out(0x06);    // Brightness level 8 (full)
+
+    // serial_out(0x53);    // Set brightness command
+    // serial_out(0x08);    // Brightness level 8 (full)
     // serial_out();
 }
 
@@ -190,18 +185,6 @@ void tca8418_init() {
 
 
 void motion_check(){
-    lcd_set_cursor(0x00);
-    lcd_print("No Motion");
-    _delay_ms(500);
-    while(1){
-        uint8_t pd4_value = (PIND & (1 << PD4)) != 0;
-
-        if(pd4_value){
-            lcd_set_cursor(0x00);
-            lcd_print("Motion Detected");
-            break;
-        }
-    }
     
 }
 
@@ -212,67 +195,23 @@ ISR(PCINT1_vect){
     
 }
 
-void timer1_init() {
-    // Set Timer1 with 1024 prescaler
-    TCCR1A = 0;                       // Normal mode
-    TCCR1B = (1 << CS12) | (1 << CS10);  // Prescaler = 1024
-
-    // Load initial timer value for 5s overflow
-    TCNT1 = 0xFFFF;
-
-    // Enable Timer1 overflow interrupt
-    TIMSK1 |= (1 << TOIE1);
-}
-
-ISR(TIMER1_OVF_vect) {
-    // This runs every 5 seconds
-    // Place your interrupt code here (e.g., toggle LED)
-    bool current_lvl = (PIND & (1<<PD4)) ? true : false; 
-
-    if(current_lvl == flag_prev_motion_lvl && !current_lvl){
-        //turns lcd off
-        _delay_ms(10);
-        serial_out(0xFE);
-        serial_out(0x53);    // Command prefix
-        serial_out(0x01);
-        TCNT1 = 0xFFFF;
-    }
-    else {
-        
-        //lcd_init(); 
-        _delay_ms(10);
-        serial_out(0xFE);
-        serial_out(0x53);    // Command prefix
-        serial_out(0x06);
-        TCNT1 = 3000;
-    }
 
 
-    
-}
 
 
 
 int main(void)
 {
-    
+    //confirm this 
     sei(); //interrupt enabler
     PCMSK1 |= (1<<PCINT11);
     PCICR  |= (1<<PCIE1);
-
-    //motion sensor pin setup
-    DDRD &= ~(1 << PD4);
-    
-    //timer configuration 
-    timer1_init(); 
-
+ 
     serial_init(47);
     lcd_init();
     i2c_init(BDIV);
     tca8418_init();
 
-    _delay_ms(1000);
-    motion_check(); //polling for motion to wakeup;
     _delay_ms(1000);
     // FSM
     State current_state  = state_locked;
@@ -290,11 +229,6 @@ int main(void)
     int user_index = 0;
     char global_code[6] = "12345";
 
-    //lcd display off test code
-    // _delay_ms(10);
-    // lcd_command(0x53);
-    // serial_out(0x01);
-    // _delay_ms(10);
 
     while(1){ //state machine
         switch(current_state){
