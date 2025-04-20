@@ -115,7 +115,7 @@ void tca8418_init() {
     i2c_io(0x68, reset_cmd, 2, NULL, 0); // TCA software reset
 
     unsigned char status;
-    char temp[20]; //to read later on
+    //char temp[20]; //to read later on
     
     //writing 0x0F to KP_GPIO1 register
     uint8_t config[2];
@@ -208,55 +208,59 @@ int main(void)
         lcd_print("flag FALSE"); 
     }
 
-    while(1){
+    while(1){ //state machine
         switch(current_state){
             case state_unlocked: { // case block used to allow for variable declarations
                 bool flag_hashtag_received = false; 
-                uint8_t tca_fifo_count = 0;
-                uint8_t wbuf[1] = { 0x03 }; 
-                uint8_t rbuf[1] = { 0x00 }; 
-                char fifo_content[10];  
+                //uint8_t tca_fifo_count = 0;
+                //uint8_t wbuf[1] = { 0x03 }; 
+                //uint8_t rbuf[1] = { 0x00 }; 
+                //char fifo_content[10];  
 
                 //lcd_state_unlocked(); //commented for testing
                 lcd_set_cursor(0x54); 
                 lcd_print("Pressed: ");
                 while(!flag_hashtag_received){ // wait for hashtag
                     
-                    if(flag_tca_int){ // if flag is set from ISR
-                        flag_tca_int = false; //reset flag
-
-                        i2c_io(0x69, wbuf, 1, rbuf, 1); 
-                        tca_fifo_count = (uint8_t) (rbuf[0]&0x0F);  // get fifo count 
-
-                        // lcd_set_cursor(0x14); 
-                        // char buffer[20];
-                        // sprintf(buffer, "Fifo Count: %d", tca_fifo_count);
-                        // lcd_print(buffer);
-                        
-
-                        for(int i = 0; i < tca_fifo_count; i++){ // read fifo contents into fifo_content array
-                            wbuf[0] = 0x04; 
-                            rbuf[0] = 0x00; 
-                            i2c_io(0x69, wbuf, 1, rbuf, 1);
-                            fifo_content[i] = rbuf[0]; 
-                            if(fifo_content[i] & 0x80){
-                                fifo_content[i] = fifo_content[i] & 0x7F; 
-                                int row = ((int)fifo_content[i] - 1) / 10;
-                                int col = ((int)fifo_content[i] - 1) % 10;
-                                fifo_content[i] = keypad[row][col];
-
-                                char buffer[20];
-                                sprintf(buffer, "%c", fifo_content[i]);
-
-                                
-                                lcd_print(buffer);
-                                lcd_print(" .");
+                    if(flag_tca_int){
+                        flag_tca_int = false;
+                    
+                        // reading int_stat to ACK receipt of int
+                        uint8_t int_stat_reg = 0x02;
+                        uint8_t int_status = 0;
+                        i2c_io(0x69, &int_stat_reg, 1, &int_status, 1);
+                    
+                        // checking if key event (0x01) is the cause of the interrupt
+                        if (int_status & 0x01) {
+                            // reading fifo
+                            uint8_t fifo_cnt_reg = 0x03;
+                            uint8_t fifo_cnt = 0;
+                            i2c_io(0x69, &fifo_cnt_reg, 1, &fifo_cnt, 1);
+                            fifo_cnt &= 0x0F;
+                            int i;
+                            for (i = 0; i < fifo_cnt; i++) {
+                                uint8_t fifo_reg = 0x04;
+                                uint8_t key_event = 0;
+                                i2c_io(0x69, &fifo_reg, 1, &key_event, 1);
+                    
+                                if (key_event & 0x80) {
+                                    key_event &= 0x7F;
+                                    int row = (key_event - 1) / 10;
+                                    int col = (key_event - 1) % 10;
+                                    char ch = keypad[row][col];
+                                    char buf[4];
+                                    sprintf(buf, "%c", ch);
+                                    lcd_print(buf);
+                                }
                             }
                         }
-                        
-                        
+                    
+                        //writing to INT_STAT to clear interrupt bits
+                        uint8_t clear_int[] = {0x02, 0x1F};
+                        i2c_io(0x68, clear_int, 2, NULL, 0);
                     }
-                    i2c_io(0x68, (uint8_t[]){0x02, 0x1F}, 2, rbuf, 1); // clear all interrupts in INT_STAT reg
+                    
+                    //i2c_io(0x68, (uint8_t[]){0x02, 0x1F}, 2, NULL, 0); // clear all interrupts in INT_STAT reg
                    
     
                 //         for(int i = 0; i < tca_fifo_count; i++){
