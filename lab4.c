@@ -43,6 +43,7 @@ volatile bool flag_prev_motion_lvl = false;
 typedef enum{
     state_unlocked,
     state_locked,
+    state_reset,
     state_attempt_unlock
 } State; 
 
@@ -119,6 +120,18 @@ void lcd_state_locked(){
     _delay_ms(10);
     lcd_set_cursor(0x14);
     lcd_print("CODE AND * TO UNLOCK");
+}
+
+void lcd_state_reset(){
+    lcd_init();
+    lcd_set_cursor(0x02);
+    lcd_print("Porch Protector");
+    _delay_ms(10);
+    lcd_set_cursor(0x42);
+    lcd_print("*INPUT MASTER CODE TO CONT.*");
+    _delay_ms(10);
+    lcd_set_cursor(0x54);
+    lcd_print("CODE & * OR # TO RETURN");
 }
 
 
@@ -286,9 +299,10 @@ int main(void)
         lcd_print("flag FALSE"); 
     }
 
-    char user_input[6] = "";
+    char user_input[10] = "";
     int user_index = 0;
-    char global_code[6] = "12345";
+    char global_code[10] = "12345";
+    char master_code[10] = "54321";
 
     //lcd display off test code
     // _delay_ms(10);
@@ -440,6 +454,11 @@ int main(void)
                                         current_state = state_locked; 
                                         break; 
                                     }
+                                    if(ch == '*'){
+                                        flag_hashtag_received = true;
+                                        current_state = state_reset;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -450,6 +469,60 @@ int main(void)
                 }
                 
                 break; 
+            }
+
+            case state_reset:{
+                lcd_state_reset();
+                bool flag_hashtag_received = false;
+                while(!flag_hashtag_received){ // wait for hashtag
+                    
+                    if(flag_tca_int){
+                        flag_tca_int = false;
+                    
+                        // reading int_stat to ACK receipt of int
+                        uint8_t int_stat_reg = 0x02;
+                        uint8_t int_status = 0;
+                        i2c_io(0x69, &int_stat_reg, 1, &int_status, 1);
+                    
+                        // checking if key event (0x01) is the cause of the interrupt
+                        if (int_status & 0x01) {
+                            // reading fifo
+                            uint8_t fifo_cnt_reg = 0x03;
+                            uint8_t fifo_cnt = 0;
+                            i2c_io(0x69, &fifo_cnt_reg, 1, &fifo_cnt, 1);
+                            fifo_cnt &= 0x0F;
+                            int i;
+                            for (i = 0; i < fifo_cnt; i++) {
+                                uint8_t fifo_reg = 0x04;
+                                uint8_t key_event = 0;
+                                i2c_io(0x69, &fifo_reg, 1, &key_event, 1);
+                    
+                                if (key_event & 0x80) {
+                                    key_event &= 0x7F;
+                                    int row = (key_event - 1) / 10;
+                                    int col = (key_event - 1) % 10;
+                                    char ch = keypad[row][col];
+                                    char buf[4];
+                                    sprintf(buf, "%c", ch);
+                                    lcd_print(buf); //printing in real time
+                                    if (ch == '#'){
+                                        flag_hashtag_received = true;
+                                        current_state = state_unlocked; 
+                                        break; 
+                                    }
+                                    if(ch == '*'){
+                                        flag_hashtag_received = true;
+                                        current_state = state_reset;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        //writing to INT_STAT to clear interrupt bits
+                        uint8_t clear_int[] = {0x02, 0x1F};
+                        i2c_io(0x68, clear_int, 2, NULL, 0);
+                    }    
+                }
             }
         }
     }
