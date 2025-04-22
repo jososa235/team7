@@ -109,7 +109,7 @@ void lcd_state_unlocked(){
     lcd_print("*** UNLOCKED ***");
     _delay_ms(10);
     lcd_set_cursor(0x54);
-    lcd_print("  PRESS # FOR LOCK");
+    lcd_print("  PRESS # FOR LOCK, * TO RESET ");
     
 }
 
@@ -135,6 +135,18 @@ void lcd_state_reset(){
     _delay_ms(10);
     lcd_set_cursor(0x54);
     lcd_print("CODE & * OR # TO RETURN");
+}
+
+void lcd_state_reset_code(){
+    lcd_init();
+    lcd_set_cursor(0x02);
+    lcd_print("Porch Protector");
+    _delay_ms(10);
+    lcd_set_cursor(0x42);
+    lcd_print("INPUT NEW CODE + *, # TO CANCELL");
+    _delay_ms(10);
+    //lcd_set_cursor(0x54);
+    //lcd_print("NEW CODE:");
 }
 
 
@@ -586,12 +598,17 @@ int main(void)
                                     char buf[4];
                                     sprintf(buf, "%c", ch);
                                     lcd_print(buf); //printing in real time
+
+                                    //issue here # goes to reset code and not backwards
                                     if (ch == '#'){ //returns to unlocked state
+                                        //clearing user input
+                                        user_input[0] = '\0';
+                                        user_index = 0;   
+                                        //returning to previous state
                                         flag_passcode_correct = true;
                                         current_state = state_unlocked; 
                                         break; 
-                                    }
-                                    if(ch == '*'){ //
+                                    } else if(ch == '*'){ //
                                         flag_passcode_correct = true;
                                         user_input[user_index] = '\0';
                                         //lcd output is code matches
@@ -618,7 +635,8 @@ int main(void)
                                             _delay_ms(1000);
                                             flag_tca_int = true;
                                             user_input[0] = '\0';
-                                            user_index = 0;     
+                                            user_index = 0; 
+                                            //flag_tca_int = true;    
                                             current_state = state_master_reset; //stays in current state
                                             break;
                                         }
@@ -637,11 +655,12 @@ int main(void)
                         i2c_io(0x68, clear_int, 2, NULL, 0);
                     }    
                 }
+                break;
             }
 
             case state_reset_code:{
                 bool flag_passcode_correct = false; 
-                lcd_state_locked(); 
+                lcd_state_reset_code(); 
                 lcd_set_cursor(0x54); 
                 lcd_print("Pressed: ");
                 //clearing user input character array
@@ -680,23 +699,34 @@ int main(void)
                                     char buf[4];
                                     sprintf(buf, "%c", ch);
                                     lcd_print(buf); //printing in real time
+
+
+                                    //state transitions are fine but keypad breaks after the state transitions with # and *
                                     if(ch == '#'){
                                         lcd_set_cursor(0x54);
                                         lcd_print("RESET CANCELLED");
-                                        flag_passcode_correct = true;
                                         _delay_ms(1000);
+                                        flag_passcode_correct = true;
+                                        //_delay_ms(1000);
                                         current_state = state_unlocked;
+                                        break;
                                     }else if(ch == '*'){
                                         user_input[user_index] = '\0';
                                         //copying code over (resetting code)
                                         memcpy(global_code, user_input, sizeof(user_input));  // copies all elements
-
+                                        user_input[0] = '\0';
+                                        user_index = 0;  
+                                        //global_code[0] = '\0';
+                                        lcd_set_cursor(0x54);
+                                        lcd_print("               ");
                                         lcd_set_cursor(0x54);
                                         lcd_print("NEW CODE:");
                                         lcd_print(global_code);
-                                        flag_passcode_correct = true;
                                         _delay_ms(1000);
+                                        flag_passcode_correct = true;
+                                        //_delay_ms(1000);
                                         current_state = state_unlocked;
+                                        break;
                                         
                                     } else {
                                         if (user_index < sizeof(user_input) - 1) {
@@ -706,9 +736,22 @@ int main(void)
                                 }
                             }
                         }
-                        //writing to INT_STAT to clear interrupt bits
+                        // Drain remaining FIFO
+                        uint8_t fifo_cnt_reg = 0x03;
+                        uint8_t fifo_cnt = 0;
+                        i2c_io(0x69, &fifo_cnt_reg, 1, &fifo_cnt, 1);
+                        fifo_cnt &= 0x0F;
+                        int j;
+                        for (j = 0; j < fifo_cnt; j++) {
+                            uint8_t dummy = 0;
+                            uint8_t fifo_reg = 0x04;
+                            i2c_io(0x69, &fifo_reg, 1, &dummy, 1);
+                        }
+
+                        // Clear INT_STAT
                         uint8_t clear_int[] = {0x02, 0x1F};
                         i2c_io(0x68, clear_int, 2, NULL, 0);
+
                     }    
                 }
                 break;
