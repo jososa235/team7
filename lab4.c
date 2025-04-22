@@ -108,8 +108,11 @@ void lcd_state_unlocked(){
     lcd_set_cursor(0x42);
     lcd_print("*** UNLOCKED ***");
     _delay_ms(10);
+    lcd_set_cursor(0x14);
+    lcd_print("  PRESS # FOR LOCK ");
+    _delay_ms(10);
     lcd_set_cursor(0x54);
-    lcd_print("  PRESS # FOR LOCK, * TO RESET ");
+    lcd_print("  PRESS * TO RESET ");
     
 }
 
@@ -130,11 +133,12 @@ void lcd_state_reset(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
-    lcd_set_cursor(0x24);
+    lcd_set_cursor(0x40);
     lcd_print("*INPUT MASTER CODE*");
     _delay_ms(10);
-    lcd_set_cursor(0x42);
-    lcd_print("CODE + * OR # TO RETURN");
+    lcd_set_cursor(0x14);
+    lcd_print("CODE + *, GO BACK: #");
+    
 }
 
 void lcd_state_reset_code(){
@@ -142,12 +146,11 @@ void lcd_state_reset_code(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
-    lcd_set_cursor(0x24);
+    lcd_set_cursor(0x40);
     lcd_print(" INPUT NEW CODE + * ");
     _delay_ms(10);
-    lcd_set_cursor(0x42);
-    lcd_print(" # TO CANCELL TO RESET");
-    _delay_ms(10);
+    lcd_set_cursor(0x14);
+    lcd_print("# TO CANCEL TO RESET");
     //lcd_set_cursor(0x54);
     //lcd_print("NEW CODE:");
 }
@@ -368,6 +371,10 @@ int main(void)
 
     //motion sensor pin setup
     DDRD &= ~(1 << PD4);
+
+    //solenoid MOSFET setup
+    DDRD |= (1 << PD3);
+    PORTD &= ~(1 << PD3);
     
     //timer configuration 
     timer1_init(); 
@@ -406,6 +413,7 @@ int main(void)
     while(1){ //state machine
         switch(current_state){
             case state_locked: { // case block used to allow for variable declarations
+                PORTD &= ~(1 << PD3); // Turn OFF the solenoid
                 bool flag_passcode_correct = false; 
                 lcd_state_locked(); 
                 lcd_set_cursor(0x54); 
@@ -451,6 +459,7 @@ int main(void)
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
                                             lcd_print("PASS");
+                                            PORTD |= (1 << PD3); //Turn solenoid ON 
                                             flag_passcode_correct = true;
                                             current_state = state_unlocked; //state transition
                                             user_input[0] = '\0';
@@ -566,6 +575,8 @@ int main(void)
 
             case state_master_reset:{
                 lcd_state_reset();
+                lcd_set_cursor(0x54); 
+                lcd_print("Pressed: ");
                 bool flag_passcode_correct = false;
                 //clearing user input character array
                 user_input[0] = '\0';
