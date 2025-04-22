@@ -130,11 +130,11 @@ void lcd_state_reset(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
-    lcd_set_cursor(0x42);
-    lcd_print("*INPUT MASTER CODE TO CONT.*");
+    lcd_set_cursor(0x24);
+    lcd_print("*INPUT MASTER CODE*");
     _delay_ms(10);
-    lcd_set_cursor(0x54);
-    lcd_print("CODE & * OR # TO RETURN");
+    lcd_set_cursor(0x42);
+    lcd_print("CODE + * OR # TO RETURN");
 }
 
 void lcd_state_reset_code(){
@@ -142,8 +142,11 @@ void lcd_state_reset_code(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
+    lcd_set_cursor(0x24);
+    lcd_print(" INPUT NEW CODE + * ");
+    _delay_ms(10);
     lcd_set_cursor(0x42);
-    lcd_print("INPUT NEW CODE + *, # TO CANCELL");
+    lcd_print(" # TO CANCELL TO RESET");
     _delay_ms(10);
     //lcd_set_cursor(0x54);
     //lcd_print("NEW CODE:");
