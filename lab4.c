@@ -33,12 +33,23 @@
 #define TCA_WRITE_ADDR  0x68
 #define TCA_READ_ADDR   0x69
 
+#define TONE_FREQ   1000UL   // Hz
+#define PRESCALER   8
+// half-period in µs = 1 000 000 / (2 × TONE_FREQ) = 250 µs
+#define HALF_PERIOD_US  (1000000UL / (2UL * TONE_FREQ))
+
 #include <avr/io.h>
 #include <util/delay.h>
 #include <stdio.h>
 #include<avr/interrupt.h>
 #include <stdbool.h> 
 #include "i2c.h"
+
+volatile uint32_t toggle_count;
+volatile uint32_t toggle_limit;
+
+volatile uint16_t lid_ms_count = 0;
+volatile bool     lid_timeout  = false;
 
 volatile bool flag_tca_int = false; 
 volatile bool flag_prev_motion_lvl = false; 
@@ -333,6 +344,84 @@ void timer1_init() {
     TIMSK1 |= (1 << TOIE1);
 }
 
+void timer2_init(void) {
+    DDRD |= (1 << PD5);
+
+    // CTC mode
+    TCCR2A  = (1 << WGM21);
+    // no COM2A bits (we toggle in the ISR)
+
+    // prescaler bits set later in start/stop functions
+
+    // Enable Compare Match A interrupt
+    TIMSK2 |= (1 << OCIE2A);
+}
+
+// Start buzzing for duration_ms milliseconds
+void buzzer_beep(uint16_t duration_ms) {
+    // Calculate how many toggles = half-period events we need:
+    // full-wave toggles per second = 2×TONE_FREQ
+    // toggles per millisecond = (2×TONE_FREQ)/1000
+    toggle_count = 0;
+    toggle_limit = ((uint32_t)TONE_FREQ * 2 * duration_ms) / 1000UL;
+
+    // Compute OCR2A for half-period:
+    OCR2A = (FOSC / (PRESCALER * 2UL * TONE_FREQ)) - 1;
+
+    // Start Timer2 with chosen prescaler:
+    // e.g. CS21 for /8
+    TCCR2B = (1 << CS21);
+
+    // Make sure global interrupts are on
+    sei();
+}
+
+// Stop the buzzer immediately
+void buzzer_stop(void) {
+    // Disable Timer2 (clear CS2[2:0])
+    TCCR2B = 0;
+    // Optionally disable interrupt:
+    // TIMSK2 &= ~(1<<OCIE2A);
+    // Drive pin low
+    PORTD &= ~(1 << PD5);
+}
+
+void timer0_init(void) {
+    // 1) Sensor pin as input w/ pull-up
+    DDRD  &= ~(1<<PD2);
+    PORTD |=  (1<<PD2);
+
+    // 2) Timer0 to CTC mode, OCR0A = (F_CPU/(1024·100))−1 → 100 Hz → 10 ms
+    TCCR0A  = (1<<WGM01);               
+    TCCR0B  = (1<<CS02)|(1<<CS00);      
+    OCR0A   = (FOSC/(1024UL*100UL)) - 1;
+    TIMSK0 |= (1<<OCIE0A);              // enable Compare-Match A interrupt
+}
+
+ISR(TIMER0_COMPA_vect) {
+    // If pd2 is high start counter
+    if (PIND & (1<<PD2)) { //if door is opened
+        if (lid_ms_count < 20000)
+            lid_ms_count = lid_ms_count + 10;         // each interrupt ≈10 ms
+        if (lid_ms_count >= 20000)
+            lid_timeout = true;
+    }
+    else {
+        // lid closed (0)= timer reset
+        lid_ms_count = 0;
+        lid_timeout  = false;
+    }
+}
+
+
+ISR(TIMER2_COMPA_vect) {
+    if (toggle_count++ < toggle_limit) {
+        PORTD ^= (1 << PD5);
+    } else {
+        buzzer_stop();
+    }
+}
+
 ISR(TIMER1_OVF_vect) {
     // This runs every 5 seconds
     // Place your interrupt code here (e.g., toggle LED)
@@ -377,7 +466,9 @@ int main(void)
     PORTD &= ~(1 << PD3);
     
     //timer configuration 
-    timer1_init(); 
+    timer1_init(); //motion timer
+    timer2_init(); //buzzer timer
+    timer0_init(); //hall effect timer
 
     serial_init(47);
     lcd_init();
@@ -410,14 +501,20 @@ int main(void)
     // serial_out(0x01);
     // _delay_ms(10);
 
+    //buzzer pin setup
+    DDRD |= (1 << PD5);
+    
     while(1){ //state machine
         switch(current_state){
             case state_locked: { // case block used to allow for variable declarations
                 PORTD &= ~(1 << PD3); // Turn OFF the solenoid
-                bool flag_passcode_correct = false; 
+                //bool flag_passcode_correct = false; 
                 lcd_state_locked(); 
                 lcd_set_cursor(0x54); 
                 lcd_print("Pressed: ");
+
+                //read_input();
+                bool flag_passcode_correct = false; 
                 while(!flag_passcode_correct){ // wait for hashtag
                     if(flag_tca_int){
                         flag_tca_int = false;
@@ -458,8 +555,19 @@ int main(void)
                                             lcd_set_cursor(0x54);
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
+                                            //int temp_counter = 0;
+                                            
+                                            /*
+                                            for(i = 0; i < 30000; ++i){
+                                                PORTD ^= (1 << PD5);   // flip pin
+                                                _delay_us(HALF_PERIOD_US/10);
+                                            }
+                                            */
+                                           buzzer_beep(1500);
+                                           //_delay_ms(10);
                                             lcd_print("PASS");
-                                            PORTD |= (1 << PD3); //Turn solenoid ON 
+                                            //_delay_ms(250);
+                                            //PORTD |= (1 << PD3); //Turn solenoid ON 
                                             flag_passcode_correct = true;
                                             current_state = state_unlocked; //state transition
                                             user_input[0] = '\0';
@@ -470,6 +578,7 @@ int main(void)
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
                                             lcd_print("NO PASS");
+                                            buzzer_beep(250);
                                             _delay_ms(500);
                                             lcd_set_cursor(0x54); 
                                             lcd_print("Pressed: ");
@@ -521,6 +630,20 @@ int main(void)
                 // lcd_set_cursor(0x54); 
                 // lcd_print("Pressed: ");
                 while(!flag_hashtag_received){ // wait for hashtag
+
+                    if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
+                        lcd_set_cursor(0x02);
+                        lcd_print("                ");
+                        lcd_set_cursor(0x02);
+                        lcd_print(" *CLOSE DOOR* ");
+
+                        while( (PIND & (1 << PD2)) != 0 ){
+                            buzzer_beep(500);
+                        }
+                        lcd_state_unlocked(); 
+                        lcd_set_cursor(0x54); 
+                        lcd_print("Pressed: ");
+                    }
                     
                     if(flag_tca_int){
                         flag_tca_int = false;
@@ -550,13 +673,23 @@ int main(void)
                                     char ch = keypad[row][col];
                                     char buf[4];
                                     sprintf(buf, "%c", ch);
-                                    lcd_print(buf); //printing in real time
+                                    //lcd_print(buf); //printing in real time
                                     if (ch == '#'){
+
+                                        //if lid is opened keep playing buzzer
+                                        if ( (PIND & (1 << PD2)) != 0 ) { //checking if PD2 is high
+                                            // PD2 is high
+                                            while( (PIND & (1 << PD2)) != 0 ){
+                                                buzzer_beep(500);
+                                            }
+                                        }
+                                        buzzer_beep(100);
                                         flag_hashtag_received = true;
                                         current_state = state_locked; 
                                         break; 
                                     }
                                     if(ch == '*'){ //goes to reset screen
+                                        buzzer_beep(100);
                                         flag_hashtag_received = true;
                                         current_state = state_master_reset;
                                         break;
@@ -582,7 +715,19 @@ int main(void)
                 user_input[0] = '\0';
                 user_index = 0;  
                 while(!flag_passcode_correct){ // wait for hashtag
-                    
+                    if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
+                        lcd_set_cursor(0x02);
+                        lcd_print("                ");
+                        lcd_set_cursor(0x02);
+                        lcd_print(" *CLOSE DOOR* ");
+
+                        while( (PIND & (1 << PD2)) != 0 ){
+                            buzzer_beep(500);
+                        }
+                        lcd_state_reset(); 
+                        lcd_set_cursor(0x54); 
+                        lcd_print("Pressed: ");
+                    }
                     if(flag_tca_int){
                         flag_tca_int = false;
                     
@@ -616,6 +761,7 @@ int main(void)
                                     //issue here # goes to reset code and not backwards
                                     if (ch == '#'){ //returns to unlocked state
                                         //clearing user input
+                                        buzzer_beep(100);
                                         user_input[0] = '\0';
                                         user_index = 0;   
                                         //returning to previous state
@@ -631,6 +777,7 @@ int main(void)
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
                                             lcd_print("PASS");
+                                            buzzer_beep(500);
                                             flag_passcode_correct = true;
                                             current_state = state_reset_code; //state transition
                                             user_input[0] = '\0';
@@ -641,6 +788,8 @@ int main(void)
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
                                             lcd_print("NO PASS");
+                                            int temp_counter = 0;
+                                            buzzer_beep(250);
                                             _delay_ms(500);
                                             lcd_set_cursor(0x54); 
                                             lcd_print("Pressed: ");
@@ -681,6 +830,19 @@ int main(void)
                 user_input[0] = '\0';
                 user_index = 0;  
                 while(!flag_passcode_correct){ // wait for hashtag
+                    if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
+                        lcd_set_cursor(0x02);
+                        lcd_print("                ");
+                        lcd_set_cursor(0x02);
+                        lcd_print(" *CLOSE DOOR* ");
+
+                        while( (PIND & (1 << PD2)) != 0 ){
+                            buzzer_beep(500);
+                        }
+                        lcd_state_reset_code(); 
+                        lcd_set_cursor(0x54); 
+                        lcd_print("Pressed: ");
+                    }
                     if(flag_tca_int){
                         flag_tca_int = false;
                         //lcd_set_cursor(0x14);
@@ -719,6 +881,7 @@ int main(void)
                                     if(ch == '#'){
                                         lcd_set_cursor(0x54);
                                         lcd_print("RESET CANCELLED");
+                                        buzzer_beep(100);
                                         _delay_ms(1000);
                                         flag_passcode_correct = true;
                                         //_delay_ms(1000);
@@ -734,6 +897,7 @@ int main(void)
                                         lcd_set_cursor(0x54);
                                         lcd_print("               ");
                                         lcd_set_cursor(0x54);
+                                        buzzer_beep(1000);
                                         lcd_print("NEW CODE:");
                                         lcd_print(global_code);
                                         _delay_ms(1000);
@@ -772,5 +936,6 @@ int main(void)
             }
         }
     }
+    
     return 0;   /* never reached */
 }
