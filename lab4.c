@@ -144,12 +144,11 @@ void lcd_state_reset(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
-    lcd_set_cursor(0x40);
+    lcd_set_cursor(0x24);
     lcd_print("*INPUT MASTER CODE*");
     _delay_ms(10);
-    lcd_set_cursor(0x14);
-    lcd_print("CODE + *, GO BACK: #");
-    
+    lcd_set_cursor(0x42);
+    lcd_print("CODE + * OR # TO RETURN");
 }
 
 void lcd_state_reset_code(){
@@ -157,11 +156,12 @@ void lcd_state_reset_code(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
-    lcd_set_cursor(0x40);
+    lcd_set_cursor(0x24);
     lcd_print(" INPUT NEW CODE + * ");
     _delay_ms(10);
-    lcd_set_cursor(0x14);
-    lcd_print("# TO CANCEL TO RESET");
+    lcd_set_cursor(0x42);
+    lcd_print(" # TO CANCELL TO RESET");
+    _delay_ms(10);
     //lcd_set_cursor(0x54);
     //lcd_print("NEW CODE:");
 }
@@ -389,7 +389,7 @@ void buzzer_stop(void) {
 void timer0_init(void) {
     // 1) Sensor pin as input w/ pull-up
     DDRD  &= ~(1<<PD2);
-    PORTD |=  (1<<PD2);
+    //PORTD |=  (1<<PD2);
 
     // 2) Timer0 to CTC mode, OCR0A = (F_CPU/(1024·100))−1 → 100 Hz → 10 ms
     TCCR0A  = (1<<WGM01);               
@@ -460,10 +460,6 @@ int main(void)
 
     //motion sensor pin setup
     DDRD &= ~(1 << PD4);
-
-    //solenoid MOSFET setup
-    DDRD |= (1 << PD3);
-    PORTD &= ~(1 << PD3);
     
     //timer configuration 
     timer1_init(); //motion timer
@@ -507,14 +503,12 @@ int main(void)
     while(1){ //state machine
         switch(current_state){
             case state_locked: { // case block used to allow for variable declarations
-                PORTD &= ~(1 << PD3); // Turn OFF the solenoid
-                //bool flag_passcode_correct = false; 
+                bool flag_passcode_correct = false; 
                 lcd_state_locked(); 
                 lcd_set_cursor(0x54); 
                 lcd_print("Pressed: ");
 
                 //read_input();
-                bool flag_passcode_correct = false; 
                 while(!flag_passcode_correct){ // wait for hashtag
                     if(flag_tca_int){
                         flag_tca_int = false;
@@ -566,8 +560,6 @@ int main(void)
                                            buzzer_beep(1500);
                                            //_delay_ms(10);
                                             lcd_print("PASS");
-                                            //_delay_ms(250);
-                                            //PORTD |= (1 << PD3); //Turn solenoid ON 
                                             flag_passcode_correct = true;
                                             current_state = state_unlocked; //state transition
                                             user_input[0] = '\0';
