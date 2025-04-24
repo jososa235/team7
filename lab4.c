@@ -617,6 +617,19 @@ int main(void)
                 bool flag_hashtag_received = false;
 
                 lcd_state_unlocked(); //commented for testing
+                if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
+                    lcd_set_cursor(0x02);
+                    lcd_print("                ");
+                    lcd_set_cursor(0x02);
+                    lcd_print(" *CLOSE DOOR* ");
+
+                    while( (PIND & (1 << PD2)) != 0 ){
+                        buzzer_beep(500);
+                    }
+                    lcd_state_unlocked(); 
+                    lcd_set_cursor(0x54); 
+                    lcd_print("Pressed: ");
+                }
                 // lcd_set_cursor(0x00);
                 // lcd_print("Current State: Unlocked");
                 // lcd_set_cursor(0x54); 
