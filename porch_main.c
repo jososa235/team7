@@ -678,7 +678,7 @@ int main(void)
                             int i;
                             for (i = 0; i < fifo_cnt; i++) {
                                 uint8_t fifo_reg = 0x04;
-                                uint8_t key_event = 0;
+                                uint8_t key_event = 0; 
                                 i2c_io(0x69, &fifo_reg, 1, &key_event, 1);
                     
                                 if (key_event & 0x80) {
@@ -701,6 +701,12 @@ int main(void)
                                         buzzer_beep(100);
                                         flag_hashtag_received = true;
                                         current_state = state_locked; 
+                                        
+                                        uint8_t key_event = 0; 
+                                        i2c_io(0x69, &fifo_reg, 1, &key_event, 1);
+                                        uint8_t clear_int[] = {0x02, 0x1F};
+                                        i2c_io(0x68, clear_int, 2, NULL, 0);
+
                                         break; 
                                     }
                                     if(ch == '*'){ //goes to reset screen
