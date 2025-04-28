@@ -43,9 +43,12 @@ volatile bool     lid_timeout  = false;
 
 volatile bool flag_tca_int = false; 
 volatile bool flag_prev_motion_lvl = false; 
+volatile bool flag_delivery_code_used = false; 
+volatile bool flag_change_master = false; 
 
 typedef enum{
     state_unlocked,
+    state_unlocked_delivery,
     state_locked,
     state_master_reset,
     state_reset_code
@@ -117,6 +120,20 @@ void lcd_state_unlocked(){
     
 }
 
+void lcd_state_unlocked_delivery(){
+    lcd_init();
+    lcd_set_cursor(0x02);
+    lcd_print("Porch  Protector");
+    _delay_ms(10);
+    lcd_set_cursor(0x42);
+    lcd_print("*** UNLOCKED ***");
+    _delay_ms(10);
+    lcd_set_cursor(0x54);
+    lcd_print("  PRESS # FOR LOCK ");
+    _delay_ms(10);
+}
+
+
 void lcd_state_locked(){
     lcd_init();
     lcd_set_cursor(0x02);
@@ -146,14 +163,25 @@ void lcd_state_reset_code(){
     lcd_set_cursor(0x02);
     lcd_print("Porch Protector");
     _delay_ms(10);
-    lcd_set_cursor(0x24);
-    lcd_print(" INPUT NEW CODE + * ");
+    lcd_set_cursor(0x40);
+    lcd_print("SET: NEW CODE *");
     _delay_ms(10);
-    lcd_set_cursor(0x42);
-    lcd_print(" # TO CANCELL TO RESET");
+    lcd_set_cursor(0x14);
+    lcd_print("#: CANCEL RESET");
     _delay_ms(10);
-    //lcd_set_cursor(0x54);
-    //lcd_print("NEW CODE:");
+}
+
+void lcd_state_reset_menu(){
+    lcd_init();
+    lcd_set_cursor(0x02);
+    lcd_print("Porch Protector");
+    _delay_ms(10);
+    lcd_set_cursor(0x14);
+    lcd_print("1: Reset DELIVERY");
+    _delay_ms(10);
+    lcd_set_cursor(0x54);
+    lcd_print("2: Reset MASTER");
+    _delay_ms(10);
 }
 
 
@@ -490,6 +518,7 @@ int main(void)
     int user_index = 0;
     char global_code[10] = "12345";
     char master_code[10] = "54321";
+    char delivery_code[10] = "11111";
 
     //lcd display off test code
     // _delay_ms(10);
@@ -514,9 +543,6 @@ int main(void)
                 while(!flag_passcode_correct){ // wait for hashtag
                     if(flag_tca_int){
                         flag_tca_int = false;
-                        //lcd_set_cursor(0x14);
-                        //lcd_print("In flag loop");
-                        //lcd_set_cursor(0x5C); //setting cursor back for passcode entry display
                     
                         // reading int_stat to ACK receipt of int
                         uint8_t int_stat_reg = 0x02;
@@ -548,22 +574,29 @@ int main(void)
                                         user_input[user_index] = '\0';
                                         //lcd output is code matches
                                         if (strcmp(global_code, user_input) == 0) {
+                                            flag_delivery_code_used = false; 
                                             lcd_set_cursor(0x54);
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
-                                            //int temp_counter = 0;
                                             
-                                            /*
-                                            for(i = 0; i < 30000; ++i){
-                                                PORTD ^= (1 << PD5);   // flip pin
-                                                _delay_us(HALF_PERIOD_US/10);
-                                            }
-                                            */
-                                           buzzer_beep(1500);
-                                           //_delay_ms(10);
+                                            buzzer_beep(1500);
                                             lcd_print("PASS");
                                             flag_passcode_correct = true;
                                             current_state = state_unlocked; //state transition
+                                            user_input[0] = '\0';
+                                            user_index = 0;   
+                                            break;
+                                        } else if (strcmp(delivery_code, user_input) == 0 && flag_delivery_code_used == false) {
+                                            flag_delivery_code_used = true; 
+                                            
+                                            lcd_set_cursor(0x54);
+                                            lcd_print("               ");
+                                            lcd_set_cursor(0x54);
+                                            
+                                            buzzer_beep(1500);
+                                            lcd_print("PASS");
+                                            flag_passcode_correct = true;
+                                            current_state = state_unlocked_delivery; //state transition
                                             user_input[0] = '\0';
                                             user_index = 0;   
                                             break;
@@ -577,8 +610,6 @@ int main(void)
                                             _delay_ms(500);
                                             lcd_set_cursor(0x54); 
                                             lcd_print("Pressed: ");
-                                            //lcd_set_cursor(0x14);
-                                            //lcd_print("         ");
                                             _delay_ms(1000);
                                             flag_tca_int = true;
                                             user_input[0] = '\0';
@@ -592,12 +623,6 @@ int main(void)
                                             }
                                             break;
                                         }
-                                        //lcd_set_cursor(0x54);
-                                        //lcd_print("IN:");
-                                        //char temp[10];
-                                        //sprintf(temp, "%10s", user_input); 
-                                        //lcd_print();
-                                        //lcd_print(user_input);       // Reset input
                                         flag_passcode_correct = false;
                                         
                                     } else {
@@ -615,14 +640,105 @@ int main(void)
                 }
                 break;
             }
-               
-            
-            case state_unlocked:{
-                //IO 
-                //lcd locked state
-                //solenoid locked state 
 
-                //next state logic
+            case state_unlocked_delivery:{
+                
+                PORTD |= (1 << PD3); //turn solenoid on
+                bool flag_hashtag_received = false;
+
+                lcd_state_unlocked_delivery(); //commented for testing
+                if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
+                    lcd_set_cursor(0x02);
+                    lcd_print("                ");
+                    lcd_set_cursor(0x02);
+                    lcd_print(" *CLOSE DOOR* ");
+
+                    while( (PIND & (1 << PD2)) != 0 ){
+                        buzzer_beep(500);
+                    }
+                    lcd_state_unlocked_delivery(); 
+                    lcd_set_cursor(0x54); 
+                    lcd_print("Pressed: ");
+                }
+                
+                while(!flag_hashtag_received){ // wait for hashtag
+
+                    if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
+                        lcd_set_cursor(0x02);
+                        lcd_print("                ");
+                        lcd_set_cursor(0x02);
+                        lcd_print(" *CLOSE DOOR* ");
+
+                        while( (PIND & (1 << PD2)) != 0 ){
+                            buzzer_beep(500);
+                        }
+                        lcd_state_unlocked_delivery(); 
+                        lcd_set_cursor(0x54); 
+                        lcd_print("Pressed: ");
+                    }
+                    
+                    if(flag_tca_int){
+                        flag_tca_int = false;
+                    
+                        // reading int_stat to ACK receipt of int
+                        uint8_t int_stat_reg = 0x02;
+                        uint8_t int_status = 0;
+                        i2c_io(0x69, &int_stat_reg, 1, &int_status, 1);
+                    
+                        // checking if key event (0x01) is the cause of the interrupt
+                        if (int_status & 0x01) {
+                            // reading fifo
+                            uint8_t fifo_cnt_reg = 0x03;
+                            uint8_t fifo_cnt = 0;
+                            i2c_io(0x69, &fifo_cnt_reg, 1, &fifo_cnt, 1);
+                            fifo_cnt &= 0x0F;
+                            int i;
+                            for (i = 0; i < fifo_cnt; i++) {
+                                uint8_t fifo_reg = 0x04;
+                                uint8_t key_event = 0; 
+                                i2c_io(0x69, &fifo_reg, 1, &key_event, 1);
+                    
+                                if (key_event & 0x80) {
+                                    key_event &= 0x7F;
+                                    int row = (key_event - 1) / 10;
+                                    int col = (key_event - 1) % 10;
+                                    char ch = keypad[row][col];
+                                    char buf[4];
+                                    sprintf(buf, "%c", ch);
+                                    //lcd_print(buf); //printing in real time
+                                    if (ch == '#'){
+
+                                        //if lid is opened keep playing buzzer
+                                        if ( (PIND & (1 << PD2)) != 0 ) { //checking if PD2 is high
+                                            // PD2 is high
+                                            while( (PIND & (1 << PD2)) != 0 ){
+                                                buzzer_beep(500);
+                                            }
+                                        }
+                                        buzzer_beep(100);
+                                        flag_hashtag_received = true;
+                                        current_state = state_locked; 
+                                        
+                                        uint8_t key_event = 0; 
+                                        i2c_io(0x69, &fifo_reg, 1, &key_event, 1);
+                                        uint8_t clear_int[] = {0x02, 0x1F};
+                                        i2c_io(0x68, clear_int, 2, NULL, 0);
+
+                                        break; 
+                                    }
+                                    //state transition code to master reset deleted
+                                }
+                            }
+                        }
+                        //writing to INT_STAT to clear interrupt bits
+                        uint8_t clear_int[] = {0x02, 0x1F};
+                        i2c_io(0x68, clear_int, 2, NULL, 0);
+                    }    
+                }
+                break; 
+            }
+               
+            case state_unlocked:{
                 PORTD |= (1 << PD3); //turn solenoid on
                 bool flag_hashtag_received = false;
 
@@ -640,10 +756,7 @@ int main(void)
                     lcd_set_cursor(0x54); 
                     lcd_print("Pressed: ");
                 }
-                // lcd_set_cursor(0x00);
-                // lcd_print("Current State: Unlocked");
-                // lcd_set_cursor(0x54); 
-                // lcd_print("Pressed: ");
+                
                 while(!flag_hashtag_received){ // wait for hashtag
 
                     if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
@@ -728,9 +841,10 @@ int main(void)
             }
 
             case state_master_reset:{
-                lcd_state_reset();
-                lcd_set_cursor(0x54); 
-                lcd_print("Pressed: ");
+                lcd_state_reset_menu(); 
+
+                // lcd_set_cursor(0x54); 
+                // lcd_print("Pressed: ");
                 bool flag_passcode_correct = false;
                 //clearing user input character array
                 user_input[0] = '\0';
@@ -745,7 +859,7 @@ int main(void)
                         while( (PIND & (1 << PD2)) != 0 ){
                             buzzer_beep(500);
                         }
-                        lcd_state_reset(); 
+                        lcd_state_reset_menu(); 
                         lcd_set_cursor(0x54); 
                         lcd_print("Pressed: ");
                     }
@@ -780,56 +894,27 @@ int main(void)
                                     lcd_print(buf); //printing in real time
 
                                     //issue here # goes to reset code and not backwards
-                                    if (ch == '#'){ //returns to unlocked state
-                                        //clearing user input
+                                    if (ch == '1'){
+                                        flag_change_master = false; 
+                                        current_state = state_reset_code; 
+                                        flag_passcode_correct = true; 
                                         buzzer_beep(100);
-                                        user_input[0] = '\0';
-                                        user_index = 0;   
-                                        //returning to previous state
-                                        flag_passcode_correct = true;
-                                        current_state = state_unlocked; 
                                         break; 
-                                    } else if(ch == '*'){ //
+                                    }
+                                    else if (ch == '2'){
+                                        flag_change_master = true; 
+                                        current_state = state_reset_code;
                                         flag_passcode_correct = true;
-                                        user_input[user_index] = '\0';
-                                        //lcd output is code matches
-                                        if (strcmp(master_code, user_input) == 0) {
-                                            lcd_set_cursor(0x54);
-                                            lcd_print("               ");
-                                            lcd_set_cursor(0x54);
-                                            lcd_print("PASS");
-                                            buzzer_beep(500);
-                                            flag_passcode_correct = true;
-                                            current_state = state_reset_code; //state transition
-                                            user_input[0] = '\0';
-                                            user_index = 0;   
-                                            break;
-                                        }else{ //lcd output if code is incorrect
-                                            lcd_set_cursor(0x54);
-                                            lcd_print("               ");
-                                            lcd_set_cursor(0x54);
-                                            lcd_print("NO PASS");
-                                            int temp_counter = 0;
-                                            buzzer_beep(250);
-                                            _delay_ms(500);
-                                            lcd_set_cursor(0x54); 
-                                            lcd_print("Pressed: ");
-                                            //lcd_set_cursor(0x14);
-                                            //lcd_print("         ");
-                                            _delay_ms(1000);
-                                            flag_tca_int = true;
-                                            user_input[0] = '\0';
-                                            user_index = 0; 
-                                            //flag_tca_int = true;    
-                                            current_state = state_master_reset; //stays in current state
-                                            break;
-                                        }
-                                        
-                                        break;
-                                    }else {
-                                        if (user_index < sizeof(user_input) - 1) {
-                                            user_input[user_index++] = ch;  // Append char to string
-                                        }
+                                        buzzer_beep(100); 
+                                        break; 
+
+                                    } else if (ch == '#'){
+                                        current_state = state_unlocked; 
+                                        flag_passcode_correct = true; 
+                                        buzzer_beep(100);
+                                        break; 
+                                    } else {
+                                        //invalid input 
                                     }
                                 }
                             }
@@ -860,15 +945,12 @@ int main(void)
                         while( (PIND & (1 << PD2)) != 0 ){
                             buzzer_beep(500);
                         }
-                        lcd_state_reset_code(); 
+                        lcd_state_reset_code();
                         lcd_set_cursor(0x54); 
                         lcd_print("Pressed: ");
                     }
                     if(flag_tca_int){
                         flag_tca_int = false;
-                        //lcd_set_cursor(0x14);
-                        //lcd_print("In flag loop");
-                        //lcd_set_cursor(0x5C); //setting cursor back for passcode entry display
                     
                         // reading int_stat to ACK receipt of int
                         uint8_t int_stat_reg = 0x02;
@@ -911,7 +993,11 @@ int main(void)
                                     }else if(ch == '*'){
                                         user_input[user_index] = '\0';
                                         //copying code over (resetting code)
-                                        memcpy(global_code, user_input, sizeof(user_input));  // copies all elements
+                                        if(flag_change_master){
+                                            memcpy(global_code, user_input, sizeof(user_input));
+                                        } else {
+                                            memcpy(delivery_code, user_input, sizeof(user_input));
+                                        }
                                         user_input[0] = '\0';
                                         user_index = 0;  
                                         //global_code[0] = '\0';
@@ -920,10 +1006,13 @@ int main(void)
                                         lcd_set_cursor(0x54);
                                         buzzer_beep(1000);
                                         lcd_print("NEW CODE:");
-                                        lcd_print(global_code);
+                                        if(flag_change_master){
+                                            lcd_print(global_code);
+                                        } else {
+                                            lcd_print(delivery_code);  
+                                        }
                                         _delay_ms(1000);
                                         flag_passcode_correct = true;
-                                        //_delay_ms(1000);
                                         current_state = state_unlocked;
                                         break;
                                         
