@@ -485,10 +485,16 @@ int main(void)
     PORTD &= ~(1<<PD3);
 
     //ESP32 alert pin
-    DDRB |= (1 << PB4);
-    PORTB &= ~(1 << PB4);
+    DDRB |= (1 << PB2);
+    PORTB &= ~(1 << PB2);
     
+    //ESP32 delivery update pin
+    DDRD |= (1 << PD7);
+    PORTD &= ~(1 << PD7);
     
+    //ESP32 delivery counter reset pin
+    DDRD |= (1 << PD6);
+    PORTD &= ~(1 << PD6);
     //timer configuration 
     timer1_init(); //motion timer
     timer2_init(); //buzzer timer
@@ -588,7 +594,6 @@ int main(void)
                                             break;
                                         } else if (strcmp(delivery_code, user_input) == 0 && flag_delivery_code_used == false) {
                                             flag_delivery_code_used = true; 
-                                            
                                             lcd_set_cursor(0x54);
                                             lcd_print("               ");
                                             lcd_set_cursor(0x54);
@@ -616,10 +621,10 @@ int main(void)
                                             user_index = 0;     
                                             current_state = state_locked;
                                             if (wrong_pw == 3){ //too many wrong attempts
-                                                PORTB |= (1 << PB4);
+                                                PORTB |= (1 << PB2);
                                                 wrong_pw = 0;
                                                 _delay_ms(1000);
-                                                PORTB &= ~(1 << PB4);
+                                                PORTB &= ~(1 << PB2);
                                             }
                                             break;
                                         }
@@ -642,6 +647,9 @@ int main(void)
             }
 
             case state_unlocked_delivery:{
+                PORTD |= (1 << PD7);
+                 _delay_ms(1000);
+                PORTD &= ~(1 << PD7);
                 
                 PORTD |= (1 << PD3); //turn solenoid on
                 bool flag_hashtag_received = false;
@@ -741,6 +749,10 @@ int main(void)
             case state_unlocked:{
                 PORTD |= (1 << PD3); //turn solenoid on
                 bool flag_hashtag_received = false;
+
+                PORTD |= (1 << PD6);
+                 _delay_ms(1000);
+                PORTD &= ~(1 << PD6);
 
                 lcd_state_unlocked(); //commented for testing
                 if(lid_timeout){ //if lid is opened for longer than 10s run buzzer indefinitely until closed.
