@@ -420,7 +420,7 @@ ISR(TIMER0_COMPA_vect) {
     // If pd2 is high start counter
     if (PIND & (1<<PD2)) { //if door is opened
         if (lid_ms_count < 20000)
-            lid_ms_count = lid_ms_count + 10;         // each interrupt ≈10 ms
+            lid_ms_count = lid_ms_count + 10;         // each interrupt 10 ms
         if (lid_ms_count >= 20000)
             lid_timeout = true;
     }
